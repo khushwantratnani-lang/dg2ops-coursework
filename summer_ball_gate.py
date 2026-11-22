@@ -78,13 +78,13 @@ def receive(sock):
 # =============================================================================
 def make_ticket(ticket_id, name, key=SIGNING_KEY):
     """TODO 1.1  Create a signed ticket: base64(details) + "." + base64(signature)."""
-    details = ...                       # TODO 1.1: a dict with "id", "name" and "event" (EVENT)
+    details = {"id": ticket_id, "name": name, "event": EVENT}   # TODO 1.1
     # Step 1: turn the details into bytes
-    data = ...                          # TODO 1.1: use the helper to_bytes()
+    data = to_bytes(details)            # TODO 1.1
     # Step 2: sign the bytes with the private key
-    signature = ...                     # TODO 1.1: an Ed25519 key has a .sign(bytes) method
+    signature = key.sign(data)          # TODO 1.1
     # Step 3: join both parts into one line of text
-    ticket = ...                        # TODO 1.1: b64() of each part, with "." between them
+    ticket = b64(data) + "." + b64(signature)   # TODO 1.1
     print(f"   [BOX OFFICE] details   : {data.decode()}")
     print(f"   [BOX OFFICE] signature : {signature.hex()[:32]}...  ({len(signature)} bytes)")
     return ticket
@@ -95,18 +95,19 @@ def check_ticket(ticket):
     Only the public key is used, so verification works offline."""
     try:
         # Step 1: split the ticket at "." and turn both parts back into bytes
-        data_text, signature_text = ...     # TODO 1.2: split the text at "."
-        data, signature = ...               # TODO 1.2: unb64() of each part
+        data_text, signature_text = ticket.split(".")   # TODO 1.2
+        data, signature = unb64(data_text), unb64(signature_text)   # TODO 1.2
         # Step 2: check the signature with the public key (raises InvalidSignature if invalid)
-        ...                                 # TODO 1.2: PUBLIC_KEY has a .verify(signature, data) method
+        PUBLIC_KEY.verify(signature, data)  # TODO 1.2
     except (ValueError, InvalidSignature):
         print("   [SCANNER]    signature verification failed - ticket rejected")
         return None
     # Step 3: the signature is valid, so the details can be trusted
-    details = ...                       # TODO 1.2: json.loads() turns the bytes back into a dict
+    details = json.loads(data)          # TODO 1.2
     # Step 4: reject a valid ticket issued for a different event
-    ...                                 # TODO 1.2: if details["event"] is not EVENT:
-                                        #           print a message and return None
+    if details.get("event") != EVENT:   # TODO 1.2 (compare values with !=, not identity)
+        print("   [SCANNER]    ticket is for a different event - rejected")
+        return None
     print(f"   [SCANNER]    signature verified: {details}")
     return details
 
@@ -114,12 +115,12 @@ def check_ticket(ticket):
 def edit_name(ticket, new_name):
     """TODO 1.3  Simulate tampering: change the holder name in a valid ticket, keeping its original signature."""
     # Step 1: split the ticket and decode the details into a dict
-    data_text, signature_text = ...     # TODO 1.3: split at "." (like in check_ticket)
-    details = ...                       # TODO 1.3: json.loads() of unb64(data_text)
+    data_text, signature_text = ticket.split(".")   # TODO 1.3
+    details = json.loads(unb64(data_text))   # TODO 1.3
     # Step 2: change the holder name
-    ...                                 # TODO 1.3: put new_name in the details
+    details["name"] = new_name          # TODO 1.3
     # Step 3: combine the modified details with the original signature
-    edited = ...                        # TODO 1.3: details encoded as in make_ticket, then "." and signature_text
+    edited = b64(to_bytes(details)) + "." + signature_text   # TODO 1.3
     print(f"   [TAMPER]     holder name changed to {new_name}; original signature kept")
     return edited
 
@@ -130,14 +131,14 @@ def edit_name(ticket, new_name):
 def totp(secret, t, step=STEP, digits=DIGITS):
     """TODO 2.1  RFC 6238: the code for time t. It changes every `step` seconds."""
     # Step 1: the number of the time slot, packed as 8 bytes (big-endian)
-    counter = ...                       # TODO 2.1: struct.pack(">Q", ...) of the slot number int(t // step)
+    counter = struct.pack(">Q", int(t // step))   # TODO 2.1
     # Step 2: HMAC-SHA1 of the counter, with the secret as the key
-    mac = ...                           # TODO 2.1: hmac.new(key, data, hashlib.sha1).digest()
+    mac = hmac.new(secret, counter, hashlib.sha1).digest()   # TODO 2.1
     # Step 3: "dynamic truncation" (RFC 4226): the last byte gives where to take 4 bytes from
-    i = ...                             # TODO 2.1: the last byte of mac, AND 0x0F
-    number = ...                        # TODO 2.1: int.from_bytes() of the 4 bytes from i ("big"), AND 0x7FFFFFFF
+    i = mac[-1] & 0x0F                  # TODO 2.1
+    number = int.from_bytes(mac[i:i + 4], "big") & 0x7FFFFFFF   # TODO 2.1
     # Step 4: keep the last `digits` digits, with leading zeros
-    return ...                          # TODO 2.1: number % 10 ** digits, as text; .zfill(digits) adds the zeros
+    return str(number % 10 ** digits).zfill(digits)   # TODO 2.1
 
 
 def ticket_secret(ticket_id):              # each ticket has its own TOTP secret
@@ -146,30 +147,30 @@ def ticket_secret(ticket_id):              # each ticket has its own TOTP secret
 
 def save_qr(text, filename):
     """TODO 2.2  Save the text as a QR image."""
-    ...                                 # TODO 2.2: qrcode.make(text) gives an image with a .save(filename) method
+    qrcode.make(text).save(filename)    # TODO 2.2
     print(f"   [WALLET]     QR image saved as {filename}")
 
 
 def read_qr(filename):
     """TODO 2.2  Read the text from a QR image."""
-    text, _, _ = ...                    # TODO 2.2: cv2.QRCodeDetectorAruco().detectAndDecode() of cv2.imread(filename)
+    text, _, _ = cv2.QRCodeDetectorAruco().detectAndDecode(cv2.imread(filename))   # TODO 2.2
     print(f"   [SCANNER]    {filename} read: {len(text)} characters")
     return text
 
 
 def server_tls_context():
     """TODO 2.3  Server TLS context for the box office: load its certificate and private key."""
-    context = ...                       # TODO 2.3: ssl.SSLContext() for a server
-    ...                                 # TODO 2.3: reject versions older than TLS 1.2 (.minimum_version)
-    ...                                 # TODO 2.3: load box.crt and box.key with .load_cert_chain()
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)   # TODO 2.3
+    context.minimum_version = ssl.TLSVersion.TLSv1_2      # TODO 2.3
+    context.load_cert_chain("box.crt", "box.key")         # TODO 2.3
     return context
 
 
 def client_tls_context():
     """TODO 2.3  Client TLS context for the wallet: trust only the box office certificate."""
-    context = ...                       # TODO 2.3: ssl.SSLContext() for a client
-    ...                                 # TODO 2.3: reject versions older than TLS 1.2 (.minimum_version)
-    ...                                 # TODO 2.3: trust only box.crt, with .load_verify_locations()
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)   # TODO 2.3 (verifies cert + hostname by default)
+    context.minimum_version = ssl.TLSVersion.TLSv1_2      # TODO 2.3
+    context.load_verify_locations("box.crt")              # TODO 2.3
     return context
 
 
@@ -236,19 +237,21 @@ def sell(name):
 def box_office(request):
     """TODO 2.4  Handle a request {"order_code": ...}. Each order code can be used only once."""
     print(f"   [BOX OFFICE] ticket requested with order code {request['order_code']}")
-    code_hash = ...                     # TODO 2.4: SHA-256 of the order code as hex text (as in sell())
+    code_hash = hashlib.sha256(request["order_code"].encode()).hexdigest()   # TODO 2.4
     # Step 1: reject an order code that has already been used
-    ...                                 # TODO 2.4: if code_hash is in used_codes: print a message
-                                        #           and return {"error": "order code already used"}
+    if code_hash in used_codes:         # TODO 2.4
+        print("   [BOX OFFICE] order code already used - request refused")
+        return {"error": "order code already used"}
     # Step 2: reject an unknown order code
-    ...                                 # TODO 2.4: if code_hash is not in orders: print a message
-                                        #           and return {"error": "unknown order code"}
+    if code_hash not in orders:         # TODO 2.4
+        print("   [BOX OFFICE] unknown order code - request refused")
+        return {"error": "unknown order code"}
     # Step 3: mark the code as used, then return the signed ticket and its secret
-    ...                                 # TODO 2.4: add code_hash to used_codes so that it cannot be reused
-    ticket_id = ...                     # TODO 2.4: look the ticket id up in orders
+    used_codes.add(code_hash)           # TODO 2.4
+    ticket_id = orders[code_hash]       # TODO 2.4
     print(f"   [BOX OFFICE] order code accepted - sending {ticket_id}; code marked as used")
-    return ...                          # TODO 2.4: {"ticket": make_ticket(...) for the holder in names,
-                                        #            "secret": ticket_secret(ticket_id) as text with b64()}
+    return {"ticket": make_ticket(ticket_id, names[ticket_id]),       # TODO 2.4
+            "secret": b64(ticket_secret(ticket_id))}
 
 
 # ----------------------------------------------------------------- WALLET (mobile device)
@@ -260,21 +263,22 @@ class Wallet:
         """TODO 2.5  Download the ticket from the box office over TLS using a one-time order code."""
         print(f"   [WALLET]     {self.owner}: requesting ticket from the box office over TLS")
         # Step 1: send the order code to the box office over TLS
-        reply = ...                         # TODO 2.5: ask() the BOX_OFFICE {"order_code": order_code}, with tls=True
+        reply = ask(BOX_OFFICE, {"order_code": order_code}, tls=True)   # TODO 2.5
         # Step 2: if the box office rejected the request, return the reason
-        ...                                 # TODO 2.5: if "error" is in reply, return "REFUSED - " + the error
+        if "error" in reply:                # TODO 2.5
+            return "REFUSED - " + reply["error"]
         # Step 3: store the ticket, and the secret as bytes
-        self.ticket, self.secret = ...      # TODO 2.5: reply["ticket"], and unb64() of reply["secret"]
+        self.ticket, self.secret = reply["ticket"], unb64(reply["secret"])   # TODO 2.5
         return "Ticket downloaded"
 
     def show(self, filename, t=None):
         """TODO 2.5  Create the QR image: ticket + "." + the code for time t."""
         t = time.time() if t is None else t
         # Step 1: the code for time t
-        code = ...                          # TODO 2.5: totp() of self.secret for time t
+        code = totp(self.secret, t)         # TODO 2.5
         print(f"   [WALLET]     code at {time.strftime('%H:%M:%S', time.localtime(t))} is {code}")
         # Step 2: save the QR image
-        ...                                 # TODO 2.5: save_qr() of self.ticket + "." + code, as filename
+        save_qr(self.ticket + "." + code, filename)   # TODO 2.5
 
 
 # =============================================================================
@@ -286,24 +290,27 @@ alerts = []          # tickets for which the hub raised a DUPLICATE ENTRY alert
 
 def make_mac(message):
     """TODO 3.2  HMAC-SHA256 of a message (a dict) using the shared GATE_KEY, as hex text."""
-    return ...                          # TODO 3.2: hmac.new(GATE_KEY, to_bytes(message), ...).hexdigest()
+    return hmac.new(GATE_KEY, to_bytes(message), hashlib.sha256).hexdigest()   # TODO 3.2
 
 
 def hub(request):
     """TODO 3.3  Handle a gate message {"gate": n, "entries": [ticket ids], "mac": ...}."""
     # Step 1: remove the HMAC from the message and verify it
-    mac = ...                           # TODO 3.3: remove "mac" from the message with request.pop("mac", "")
-    ...                                 # TODO 3.3: if mac does not match make_mac(request) (hmac.compare_digest):
-                                        #           print a message and return {"error": "REJECTED - bad HMAC"}
+    mac = request.pop("mac", "")        # TODO 3.3
+    if not hmac.compare_digest(mac, make_mac(request)):   # TODO 3.3
+        print("   [HUB]        bad HMAC - message rejected")
+        return {"error": "REJECTED - bad HMAC"}
     print(f"   [HUB]        HMAC verified: gate {request['gate']} reports {request['entries']}")
     # Step 2: record which gates admitted each ticket; two gates indicate a duplicate entry
     for ticket_id in request["entries"]:
-        ...                             # TODO 3.3: gates = hub_list.setdefault(ticket_id, set());
-                                        #           if request["gate"] is not in gates, add it, and if gates
-                                        #           now has 2 entries: alerts.append(ticket_id) and print
-                                        #           "*** DUPLICATE ENTRY ... ***"
+        gates = hub_list.setdefault(ticket_id, set())            # TODO 3.3
+        if request["gate"] not in gates:
+            gates.add(request["gate"])
+            if len(gates) == 2:
+                alerts.append(ticket_id)
+                print(f"   [HUB]        *** DUPLICATE ENTRY: {ticket_id} admitted at gates {sorted(gates)} ***")
     # Step 3: reply with the full list: ticket id -> first gate of entry
-    return ...                          # TODO 3.3: {"all": {each ticket id in hub_list: the min() of its gates}}
+    return {"all": {tid: min(g) for tid, g in hub_list.items()}}   # TODO 3.3
 
 
 class Scanner:
@@ -315,29 +322,30 @@ class Scanner:
     def code_is_fresh(self, ticket_id, code, t):
         """TODO 2.6  Return True if the code matches the current or the previous time slot."""
         # Step 1: the ticket secret, and the expected codes for the current and previous time slots
-        secret = ...                        # TODO 2.6: ticket_secret() of the ticket id
-        now, before = ...                   # TODO 2.6: totp() of the secret for time t, and for time t - STEP
+        secret = ticket_secret(ticket_id)   # TODO 2.6
+        now, before = totp(secret, t), totp(secret, t - STEP)   # TODO 2.6
         print(f"   [SCANNER {self.gate}]  QR code value {code}; expected {now} (or previous {before})")
         # Step 2: compare in constant time with hmac.compare_digest
-        return ...                          # TODO 2.6: True if code matches now or before (hmac.compare_digest)
+        return hmac.compare_digest(code, now) or hmac.compare_digest(code, before)   # TODO 2.6
 
     def scan(self, filename, t=None):
         """Check a QR image at this gate. Gate 1 and Gate 2 checks: TODO 2.6. Gate 3 check: TODO 3.1."""
         t = time.time() if t is None else t
         print(f"   [SCANNER {self.gate}]  scanning {filename}")
         # Read the QR image; its text is ticket + "." + code
-        ticket, _, code = ...               # TODO 2.6: read_qr(filename), then .rpartition(".") cuts off the code
+        ticket, _, code = read_qr(filename).rpartition(".")   # TODO 2.6
         # Gate 1: verify the ticket signature
-        details = ...                       # TODO 2.6: check_ticket() of the ticket (TODO 1.2)
-        ...                                 # TODO 2.6: if details is None, return "INVALID - signature verification failed"
+        details = check_ticket(ticket)      # TODO 2.6
+        if details is None:                 # TODO 2.6
+            return "INVALID - signature verification failed"
         ticket_id = details["id"]
         # Gate 2: verify that the code is current
-        ...                                 # TODO 2.6: if the code is not current (self.code_is_fresh),
-                                            #           return "INVALID - code expired"
+        if not self.code_is_fresh(ticket_id, code, t):   # TODO 2.6
+            return "INVALID - code expired"
         # Gate 3: reject a ticket that has already been admitted; otherwise record it
-        ...                                 # TODO 3.1: if ticket_id is in self.seen, return
-                                            #           f"REFUSED - already admitted at Gate {self.seen[ticket_id]}"
-        ...                                 # TODO 3.1: otherwise record it: self.seen[ticket_id] = self.gate
+        if ticket_id in self.seen:           # TODO 3.1
+            return f"REFUSED - already admitted at Gate {self.seen[ticket_id]}"
+        self.seen[ticket_id] = self.gate    # TODO 3.1
         print(f"   [SCANNER {self.gate}]  entry list: {self.seen}")
         return "VALID - " + details["name"]
 
@@ -347,14 +355,14 @@ class Scanner:
             print(f"   [SCANNER {self.gate}]  network unavailable - hub not reachable")
             return
         # Step 1: build the message (gate number and local entries) and add its HMAC
-        mine = ...                          # TODO 3.4: the ticket ids in self.seen whose gate is self.gate
-        message = ...                       # TODO 3.4: a dict with "gate" (self.gate) and "entries" (mine)
-        message["mac"] = ...                # TODO 3.4: the HMAC of the message (TODO 3.2)
+        mine = [tid for tid, g in self.seen.items() if g == self.gate]   # TODO 3.4
+        message = {"gate": self.gate, "entries": mine}   # TODO 3.4
+        message["mac"] = make_mac(message)  # TODO 3.4
         print(f"   [SCANNER {self.gate}]  -> HUB: local entries {mine}")
         # Step 2: send the message, then merge the entries of other gates
-        reply = ...                         # TODO 3.4: ask() the HUB with the message (no TLS: the HMAC protects it)
-        ...                                 # TODO 3.4: for each ticket_id, gate in reply["all"].items():
-                                            #           add it to self.seen if it is new (.setdefault)
+        reply = ask(HUB, message)           # TODO 3.4 (no TLS: the HMAC protects it)
+        for ticket_id, gate in reply["all"].items():   # TODO 3.4
+            self.seen.setdefault(ticket_id, gate)
         print(f"   [SCANNER {self.gate}]  <- HUB: entry list {self.seen}")
 
 

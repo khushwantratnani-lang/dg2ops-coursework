@@ -117,7 +117,10 @@ int need[P][R];
 
 void calculateNeed(void)
 {
-    /* TODO 1: Write your code here */
+    /* TODO 1: Need = Maximum - Allocation for every process/resource */
+    for (int i = 0; i < P; i++)
+        for (int j = 0; j < R; j++)
+            need[i][j] = maximum[i][j] - allocation[i][j];
 }
 
 /* =================================================
@@ -134,9 +137,31 @@ void calculateNeed(void)
 
 int validateState(void)
 {
-    /* TODO 2: Write your code here */
+    /* TODO 2: validate the system state */
+    for (int j = 0; j < R; j++)
+    {
+        /* 1. Available must not be negative */
+        if (available[j] < 0)
+            return 0;
 
-    return 0;
+        int allocated = 0;
+
+        for (int i = 0; i < P; i++)
+        {
+            /* 2. Allocation must be >= 0 and must not exceed Maximum */
+            if (allocation[i][j] < 0 ||
+                allocation[i][j] > maximum[i][j])
+                return 0;
+
+            allocated += allocation[i][j];
+        }
+
+        /* 3. Available + allocated must equal Total */
+        if (available[j] + allocated != total[j])
+            return 0;
+    }
+
+    return 1;
 }
 
 /* =================================================
@@ -158,9 +183,57 @@ int validateState(void)
 
 int safetyAlgorithm(int safeSequence[P])
 {
-    /* TODO 3: Write your code here */
+    /* TODO 3: Banker's safety algorithm */
+    int work[R];
+    bool finish[P];
+    int count = 0;
 
-    return 0;
+    calculateNeed();                      /* keep Need up to date */
+
+    for (int j = 0; j < R; j++)           /* 1. Work = Available */
+        work[j] = available[j];
+
+    for (int i = 0; i < P; i++)           /* 2. Finish[i] = false */
+    {
+        finish[i] = false;
+        safeSequence[i] = -1;
+    }
+
+    while (count < P)
+    {
+        bool found = false;
+
+        for (int i = 0; i < P; i++)
+        {
+            if (finish[i])
+                continue;
+
+            /* 3. unfinished process with Need <= Work */
+            bool canRun = true;
+
+            for (int j = 0; j < R; j++)
+                if (need[i][j] > work[j])
+                {
+                    canRun = false;
+                    break;
+                }
+
+            if (canRun)
+            {
+                for (int j = 0; j < R; j++)       /* 4. Work += Allocation */
+                    work[j] += allocation[i][j];
+
+                finish[i] = true;                 /* 5. mark finished */
+                safeSequence[count++] = i;        /* 6. store PID */
+                found = true;
+            }
+        }
+
+        if (!found)                               /* 7. nobody can run */
+            break;
+    }
+
+    return count == P;                            /* 1 = SAFE, 0 = UNSAFE */
 }
 
 /* =================================================
@@ -180,8 +253,48 @@ int safetyAlgorithm(int safeSequence[P])
 
 int requestResources(int pid, int request[R])
 {
-    /* TODO 4: Write your code here */
+    /* TODO 4: resource request algorithm */
+    int sequence[P];
 
+    /* 1. Validate process ID */
+    if (pid < 0 || pid >= P)
+        return 0;
+
+    calculateNeed();
+
+    for (int j = 0; j < R; j++)
+    {
+        if (request[j] < 0)               /* reject negative requests */
+            return 0;
+
+        if (request[j] > need[pid][j])    /* 2. Request <= Need */
+            return 0;
+
+        if (request[j] > available[j])    /* 3. Request <= Available */
+            return 0;
+    }
+
+    /* 4. Temporarily allocate */
+    for (int j = 0; j < R; j++)
+    {
+        available[j]       -= request[j];
+        allocation[pid][j] += request[j];
+    }
+
+    /* 5. Safety check (recomputes Need) */
+    int safe = safetyAlgorithm(sequence);
+
+    if (safe)
+        return 1;                         /* 6. grant */
+
+    /* 7. Roll back */
+    for (int j = 0; j < R; j++)
+    {
+        available[j]       += request[j];
+        allocation[pid][j] -= request[j];
+    }
+
+    calculateNeed();
     return 0;
 }
 
@@ -199,9 +312,26 @@ int requestResources(int pid, int request[R])
 
 int releaseResources(int pid, int release[R])
 {
-    /* TODO 5: Write your code here */
+    /* TODO 5: release resources */
 
-    return 0;
+    /* 1. Validate process ID */
+    if (pid < 0 || pid >= P)
+        return 0;
+
+    /* 2 + 3. Quantities must be >= 0 and <= current Allocation */
+    for (int j = 0; j < R; j++)
+        if (release[j] < 0 || release[j] > allocation[pid][j])
+            return 0;
+
+    /* 4. Update Allocation and Available */
+    for (int j = 0; j < R; j++)
+    {
+        allocation[pid][j] -= release[j];
+        available[j]       += release[j];
+    }
+
+    calculateNeed();
+    return 1;
 }
 
 /* =================================================
@@ -220,7 +350,33 @@ int releaseResources(int pid, int release[R])
 
 void displayState(void)
 {
-    /* TODO 6: Write your code here */
+    /* TODO 6: print the OS state as a table */
+    calculateNeed();
+
+    printf("\n%-8s| %-12s| %-12s| %-12s\n",
+           "Process", "Allocation", "Maximum", "Need");
+    printf("--------+-------------+-------------+-------------\n");
+
+    for (int i = 0; i < P; i++)
+    {
+        printf("P%-7d|", i);
+
+        for (int j = 0; j < R; j++) printf(" %2d", allocation[i][j]);
+        printf("   |");
+
+        for (int j = 0; j < R; j++) printf(" %2d", maximum[i][j]);
+        printf("   |");
+
+        for (int j = 0; j < R; j++) printf(" %2d", need[i][j]);
+        printf("\n");
+    }
+
+    printf("\nAvailable resources: [");
+
+    for (int j = 0; j < R; j++)
+        printf("%d%s", available[j], j < R - 1 ? ", " : "");
+
+    printf("]\n");
 }
 
 /* =================================================
